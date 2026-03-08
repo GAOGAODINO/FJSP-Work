@@ -1,0 +1,242 @@
+"""
+主程序入口 - 运行FJSP三种算法对比实验
+"""
+import os
+import random
+import numpy as np
+from datetime import datetime
+
+from data_loader import load_fjsp_instance
+from spt_rule import priority_rule_schedule
+from genetic_algorithm import FJSP_GA
+from tabu_search import TabuSearch
+from visualization import plot_gantt, plot_convergence
+
+
+def run_experiment(instance_file, output_dir='results'):
+    """运行单个实例的实验（包含三种算法）"""
+    print(f"\n{'=' * 60}")
+    print(f"正在处理: {instance_file}")
+    print('=' * 60)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    instance_name = os.path.splitext(os.path.basename(instance_file))[0]
+
+    try:
+        # 加载数据
+        jobs, num_machines = load_fjsp_instance(instance_file)
+
+        # 1. 优先规则基准
+        print("\n--- 优先规则基准解 (SPT) ---")
+        pr_makespan, pr_schedule = priority_rule_schedule(jobs, num_machines)
+        if pr_makespan is not None:
+            print(f"SPT规则 makespan: {pr_makespan}")
+            plot_gantt(pr_schedule, num_machines,
+                       f"{output_dir}/{instance_name}_spt_gantt.png",
+                       f"{instance_name} - SPT Rule (Makespan={pr_makespan})")
+        else:
+            print("SPT规则无法生成有效解")
+
+        # 2. 遗传算法
+        print("\n--- 遗传算法求解 (GA) ---")
+        if len(jobs) <= 5:
+            pop_size, generations = 50, 200
+        elif len(jobs) <= 10:
+            pop_size, generations = 100, 300
+        else:
+            pop_size, generations = 150, 400
+
+        print(f"  参数设置: 种群大小={pop_size}, 代数={generations}")
+        ga = FJSP_GA(jobs, num_machines, pop_size=pop_size, generations=generations)
+        ga_best, ga_makespan, ga_schedule, ga_history = ga.evolve()
+
+        # 3. 禁忌搜索算法
+        print("\n--- 禁忌搜索求解 (TS) ---")
+        if len(jobs) <= 10:
+            ts_iterations = 100
+        else:
+            ts_iterations = 150
+
+        print(f"  参数设置: 最大迭代次数={ts_iterations}, 禁忌表大小=20")
+        ts = TabuSearch(jobs, num_machines, max_iterations=ts_iterations, tabu_size=20)
+        ts_best, ts_makespan, ts_schedule, ts_history = ts.solve()
+
+        # 结果对比
+        if ga_makespan != float('inf') and ts_makespan != float('inf'):
+            print(f"\n{'=' * 50}")
+            print("最终结果对比")
+            print(f"{'=' * 50}")
+            print(f"  SPT规则: {pr_makespan if pr_makespan is not None else 'N/A'}")
+            print(f"  遗传算法: {ga_makespan:.1f}")
+            print(f"  禁忌搜索: {ts_makespan:.1f}")
+
+            if pr_makespan is not None and pr_makespan > 0:
+                ga_improvement = (pr_makespan - ga_makespan) / pr_makespan * 100
+                ts_improvement = (pr_makespan - ts_makespan) / pr_makespan * 100
+                print(f"  GA改进率: {ga_improvement:.2f}%")
+                print(f"  TS改进率: {ts_improvement:.2f}%")
+
+                # 对比GA和TS
+                if ga_makespan < ts_makespan:
+                    print(f"  GA比TS好 {ts_makespan - ga_makespan:.1f} ({((ts_makespan - ga_makespan) / ts_makespan * 100):.2f}%)")
+                elif ts_makespan < ga_makespan:
+                    print(f"  TS比GA好 {ga_makespan - ts_makespan:.1f} ({((ga_makespan - ts_makespan) / ga_makespan * 100):.2f}%)")
+                else:
+                    print(f"  GA和TS结果相同")
+
+            # 保存GA结果
+            plot_gantt(ga_schedule, num_machines,
+                       f"{output_dir}/{instance_name}_ga_gantt.png",
+                       f"{instance_name} - GA Result (Makespan={ga_makespan:.1f})")
+            plot_convergence(ga_history, f"{output_dir}/{instance_name}_ga_convergence.png",
+                             f"{instance_name} - GA Convergence")
+
+            # 保存TS结果
+            plot_gantt(ts_schedule, num_machines,
+                       f"{output_dir}/{instance_name}_ts_gantt.png",
+                       f"{instance_name} - TS Result (Makespan={ts_makespan:.1f})")
+            plot_convergence(ts_history, f"{output_dir}/{instance_name}_ts_convergence.png",
+                             f"{instance_name} - TS Convergence")
+
+            # 保存结果到文本文件
+            with open(f"{output_dir}/{instance_name}_results.txt", 'w', encoding='utf-8') as f:
+                f.write(f"实例: {instance_file}\n")
+                f.write(f"作业数: {len(jobs)}\n")
+                f.write(f"机器数: {num_machines}\n")
+                f.write(f"SPT规则 makespan: {pr_makespan if pr_makespan is not None else 'N/A'}\n")
+                f.write(f"遗传算法 makespan: {ga_makespan:.1f}\n")
+                f.write(f"禁忌搜索 makespan: {ts_makespan:.1f}\n")
+                if pr_makespan is not None and pr_makespan > 0:
+                    f.write(f"GA改进率: {ga_improvement:.2f}%\n")
+                    f.write(f"TS改进率: {ts_improvement:.2f}%\n")
+
+            return {
+                'instance': instance_name,
+                'jobs': len(jobs),
+                'machines': num_machines,
+                'pr_makespan': pr_makespan,
+                'ga_makespan': ga_makespan,
+                'ts_makespan': ts_makespan,
+                'ga_improvement': ga_improvement if pr_makespan is not None else 0,
+                'ts_improvement': ts_improvement if pr_makespan is not None else 0
+            }
+        else:
+            print("算法无法找到有效解")
+            return None
+
+    except Exception as e:
+        print(f"错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+if __name__ == "__main__":
+    # 设置随机种子
+    random.seed(42)
+    np.random.seed(42)
+
+    # 测试实例 - 分层设计
+    instances = [
+        # 小规模验证
+        'k1.json',
+        # 中规模对比
+        'mk01.json',
+        'mk02.json',
+        # 大规模测试
+        'lar01_1.json',
+        'lar01_2.json',
+    ]
+
+    print("=" * 70)
+    print("FJSP 三种算法对比求解（分层实验设计）")
+    print("=" * 70)
+    print(f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"实验层级:")
+    print(f"  - 小规模验证: k1.json (4×5)")
+    print(f"  - 中规模对比: mk01.json (10×6), mk02.json (10×6)")
+    print(f"  - 大规模测试: lar01_1.json (10×60), lar01_2.json (10×60)")
+    print("=" * 70)
+
+    results = []
+
+    for i, inst in enumerate(instances, 1):
+        print(f"\n[{i}/{len(instances)}]")
+        if os.path.exists(inst):
+            if 'lar' in inst:
+                print(f"  ⚠ 大规模实例，运行时间可能较长...")
+            result = run_experiment(inst)
+            if result:
+                results.append(result)
+        else:
+            print(f"警告：找不到文件 {inst}")
+            print(f"请确保 {inst} 在当前目录下")
+
+    # 结果汇总
+    if results:
+        print("\n\n" + "=" * 100)
+        print("分层实验结果汇总")
+        print("=" * 100)
+        print(f"{'实例':<15} {'规模':<12} {'SPT':<8} {'GA':<8} {'TS':<8} {'GA改进%':<8} {'TS改进%':<8} {'最优'}")
+        print("-" * 100)
+
+        for r in results:
+            if r['instance'] == 'k1':
+                scale = "4×5"
+            elif r['instance'] == 'mk01':
+                scale = "10×6"
+            elif r['instance'] == 'mk02':
+                scale = "10×6"
+            elif 'lar01_1' in r['instance']:
+                scale = "10×60"
+            elif 'lar01_2' in r['instance']:
+                scale = "10×60"
+            else:
+                scale = f"{r['jobs']}×{r['machines']}"
+
+            pr = r['pr_makespan'] if r['pr_makespan'] is not None else 0
+            ga = r['ga_makespan']
+            ts = r['ts_makespan']
+
+            best_val = min(ga, ts)
+            best_algo = []
+            if ga == best_val:
+                best_algo.append('GA')
+            if ts == best_val:
+                best_algo.append('TS')
+            best_str = '/'.join(best_algo)
+
+            print(f"{r['instance']:<15} {scale:<12} {pr:<8} {ga:<8.1f} {ts:<8.1f} "
+                  f"{r['ga_improvement']:<8.2f} {r['ts_improvement']:<8.2f} {best_str}")
+
+        # 保存汇总
+        with open('results/summary.txt', 'w', encoding='utf-8') as f:
+            f.write("实例,规模,SPT规则,遗传算法,禁忌搜索,GA改进率(%),TS改进率(%),最优算法\n")
+            for r in results:
+                if r['instance'] == 'k1':
+                    scale = "4x5"
+                elif r['instance'] == 'mk01':
+                    scale = "10x6"
+                elif r['instance'] == 'mk02':
+                    scale = "10x6"
+                elif 'lar01_1' in r['instance']:
+                    scale = "10x60"
+                elif 'lar01_2' in r['instance']:
+                    scale = "10x60"
+                else:
+                    scale = f"{r['jobs']}x{r['machines']}"
+
+                best_val = min(r['ga_makespan'], r['ts_makespan'])
+                best_algo = 'GA' if r['ga_makespan'] == best_val else 'TS'
+                if r['ga_makespan'] == r['ts_makespan']:
+                    best_algo = 'Equal'
+
+                f.write(f"{r['instance']},{scale},{r['pr_makespan']},{r['ga_makespan']:.1f},{r['ts_makespan']:.1f},"
+                        f"{r['ga_improvement']:.2f},{r['ts_improvement']:.2f},{best_algo}\n")
+
+        print(f"\n所有结果已保存到 'results' 文件夹")
+        print(f"汇总文件: results/summary.txt")
+
+    print(f"\n程序运行完成！时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
