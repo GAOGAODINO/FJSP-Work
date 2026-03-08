@@ -1,0 +1,8 @@
+实例: lar01_2.json
+作业数: 10
+机器数: 60
+SPT规则 makespan: 215
+遗传算法 makespan: 125.0
+禁忌搜索 makespan: 148.0
+GA改进率: 41.86%
+TS改进率: 31.16%

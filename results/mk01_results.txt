@@ -1,0 +1,8 @@
+实例: mk01.json
+作业数: 10
+机器数: 6
+SPT规则 makespan: 92
+遗传算法 makespan: 49.0
+禁忌搜索 makespan: 48.0
+GA改进率: 46.74%
+TS改进率: 47.83%

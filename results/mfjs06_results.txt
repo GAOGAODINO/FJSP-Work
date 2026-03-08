@@ -1,0 +1,8 @@
+实例: mfjs06.json
+作业数: 8
+机器数: 7
+SPT规则 makespan: 1635
+遗传算法 makespan: 729.0
+禁忌搜索 makespan: 768.0
+GA改进率: 55.41%
+TS改进率: 53.03%
